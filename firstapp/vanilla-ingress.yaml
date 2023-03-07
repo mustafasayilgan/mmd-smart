@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vanillapp-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/location-snippet: |
+      location / {
+        proxy_pass http://fortask.com;
+        proxy_set_header Host $host;
+        ...
+      }    
+spec:
+  rules:
+  - host: fortask.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vanillapp-service
+            port:
+              number: 80

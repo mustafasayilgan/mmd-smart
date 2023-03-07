@@ -1,0 +1,80 @@
+stages:
+  - build
+  - deploy
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t mustafasayilgan/vanillappgit:$CI_COMMIT_SHA .
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker push mustafasayilgan/vanillappgit:$CI_COMMIT_SHA
+
+deploy:
+  stage: deploy
+  image: ubuntu:20.04
+  script:
+    # Install Tinyproxy.
+    - apt-get update && apt-get install -y tinyproxy
+    - apt-get install -y lsof    
+     #Configure Tinyproxy to allow connections from the GitLab Runner container.
+    # - echo "Allow 172.17.0.0/16" >> /etc/tinyproxy.conf
+    - echo "Allow 127.0.0.1" >> /etc/tinyproxy/tinyproxy.conf
+    - cat /etc/tinyproxy/tinyproxy.conf
+    - service tinyproxy stop
+    # - lsof -ti:8889 | xargs kill
+    # - lsof -ti:8888 | xargs kill     
+    - service tinyproxy start    
+    - apt-get update && apt-get install -y curl gnupg
+    - echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+    - curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+    - apt-get update && apt-get install -y google-cloud-sdk
+    - apt-get install -y openssh-client
+    - apt-get install kubectl
+    - apt-get install google-cloud-sdk-gke-gcloud-auth-plugin
+    # - gcloud components install kubectl 
+  # script:
+    # -  lsof -ti:8888 | xargs kill -9
+    # Connect to the bastion host using gcloud.
+    - gcloud auth activate-service-account --key-file=./testing-2-379112-fba5ab6ed842.json
+    - gcloud config set project testing-2-379112
+    # - gcloud compute firewall-rules create allow-ssh --allow tcp:22
+    # - gcloud compute firewall-rules create allow-https --allow tcp:443 --source-ranges 0.0.0.0/0 --description "Allow inbound HTTPS traffic"
+    # - gcloud compute ssh app-cluster-bastion --tunnel-through-iap --project testing-2-379112 --zone europe-west1-b -- -L8889:127.0.0.1:8888 -f tail -f /dev/null
+    # Use Tinyproxy as an HTTP proxy for kubectl.
+    # - export HTTPS_PROXY=http://172.17.0.1:8888
+    # - alias kube='kubectl --insecure-skip-tls-verify'
+    - gcloud container clusters get-credentials app-cluster --region europe-west1 --project testing-2-379112
+    - kubectl config set-cluster app-cluster --server=https://127.0.0.1:8888 --insecure-skip-tls-verify=true
+    - gcloud compute ssh app-cluster-bastion --tunnel-through-iap --project testing-2-379112 --zone europe-west1-b -- -L8888:127.0.0.1:8888 -f tail -f /dev/null
+    - alias kubectl='HTTPS_PROXY=localhost:8888 kubectl'    
+    - kubectl get pods
+    - kubectl apply -f vanilla.yaml
+    - kubectl apply -f vanilla-ingress.yaml
+# deploy:
+#   stage: deploy
+#   image: google/cloud-sdk:latest
+#   script:
+#     # - apt-get update && apt-get install -y tinyproxy
+#     # - sudo service docker start
+#     # - kubectl çalışıyor
+#     # Connect to the bastion host using gcloud.
+#     - gcloud auth activate-service-account --key-file=./testing-2-379112-fba5ab6ed842.json
+#     - gcloud config set project testing-2-379112
+#     - gcloud compute ssh app-cluster-bastion --tunnel-through-iap --project testing-2-379112 --zone europe-west1-b -- -L8888:127.0.0.1:8888 -f tail -f /dev/null
+#     - alias kubectl='HTTPS_PROXY=localhost:8888 kubectl'
+#     - gcloud container clusters get-credentials app-cluster --region europe-west1 --project testing-2-379112
+#     # - kubectl config set-cluster app-cluster --server=10.100.100.2 --certificate-authority=/home/sa_112459523486667009085/.kube/config --embed-certs=true
+#     # Connect to the Kubernetes cluster using kubectl.
+#     - kubectl config set-cluster app-cluster --server=https://127.0.0.1:8888 --insecure-skip-tls-verify=true
+#     # - kubectl config set-credentials gke_terraform-test-308408_europe-west1_app-cluster --token=$KUBECONFIG_TOKEN
+#     # - kubectl config set-context gke_terraform-test-308408_europe-west1_app-cluster --cluster=app-cluster --user=gke_terraform-test-308408_europe-west1_app-cluster
+#     # - kubectl config use-context gke_terraform-test-308408_europe-west1_app-cluster
+#     - kubectl apply -f vanilla.yaml
+#     - kubectl apply -f vanilla-ingress.yaml    
+  environment:
+    name: production
+  only:
+    - main

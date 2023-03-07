@@ -1,0 +1,33 @@
+deploy:
+  stage: deploy
+  image: ubuntu:latest
+  before_script:
+    # Install Tinyproxy.
+    - apt-get update && apt-get install -y tinyproxy
+    # Configure Tinyproxy to allow connections from the GitLab Runner container.
+    # - echo "Allow 172.17.0.0/16" >> /etc/tinyproxy.conf
+    - echo "Allow 127.0.0.1/16" >> /etc/tinyproxy.conf
+    - cat /etc/tinyproxy.conf
+    - service tinyproxy restart
+    - apt-get update && apt-get install -y curl gnupg
+    - echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+    - curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+    - apt-get update && apt-get install -y google-cloud-sdk
+    - apt-get install -y openssh-client
+    - apt-get install kubectl
+    - apt-get install google-cloud-sdk-gke-gcloud-auth-plugin
+    - apt-get update && apt-get install -y curl gnupg
+    - curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+  
+  script:
+    - gcloud auth activate-service-account --key-file=./testing-2-379112-fba5ab6ed842.json
+    - gcloud config set project testing-2-379112
+    - gcloud compute ssh app-cluster-bastion --tunnel-through-iap --project testing-2-379112 --zone europe-west1-b -- -L8888:127.0.0.1:8888 -f tail -f /dev/null
+    - alias helm='HTTPS_PROXY=localhost:8888 helm'
+    - gcloud container clusters get-credentials app-cluster --region europe-west1 --project testing-2-379112  
+    - helm repo add runix https://helm.runix.net/
+    - helm upgrade --install -f ./values.yaml  my-pgadmin4 runix/pgadmin4
+  environment:
+    name: production
+  only:
+    - main
